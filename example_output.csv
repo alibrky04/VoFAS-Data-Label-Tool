@@ -1,0 +1,11 @@
+feedback_id,text,gemini-1.5-flash,gpt-4o-mini
+1,"The pizza was amazing, but a bit too salty.",1,1
+2,"The staff was friendly, but the wait was long.",0,0
+3,"I loved the dessert, it was the highlight of the meal.",1,1
+4,The portion was too small for the price.,-1,-1
+5,"The ambiance was great, perfect for a casual dinner.",1,1
+6,The pasta was bland and lacked flavor.,-1,-1
+7,"The steak was cooked to perfection, very tender.",1,1
+8,"I didn't enjoy the soup, it was too cold.",-1,-1
+9,The restaurant was clean and well-maintained.,1,1
+10,"The drinks were overpriced, but the food was good.",0,0
