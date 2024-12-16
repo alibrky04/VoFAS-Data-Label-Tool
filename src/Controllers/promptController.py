@@ -32,7 +32,9 @@ class promptController:
         sentiment
         where sentiment is -1 for negative, 0 for neutral, and 1 for positive.
 
-        Rule 1: Don't output any other information. Only output the sentiment analysis you do.
+        Rule 1: Don't output feedback_id. Only output the sentiment value.
+        Rule 2: Give a sentinement value for every feedback. Don't skip anything.
+        Rule 3: Feedbacks can be in other languages. Mainly Turkish
 
         Example
 

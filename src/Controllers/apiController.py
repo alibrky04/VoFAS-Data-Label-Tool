@@ -18,8 +18,8 @@ class apiController:
 
         self.gpt_client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
         self.gpt_model = 'gpt-4o-mini'
-        self.gpt_temperature = 0.5
-        self.gpt_max_tokens = 500
+        self.gpt_temperature = 0.4
+        self.gpt_max_tokens = 2000
 
         self.responses = {model: None for model in models}
         self.responseTexts = {model: None for model in models}
