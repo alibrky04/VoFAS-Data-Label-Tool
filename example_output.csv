@@ -1,6 +1,6 @@
-feedback_id,text,gemini-1.5-flash,gpt-4o-mini
-1,"The pizza was amazing, but a bit too salty.",1,0
-2,"The staff was friendly, but the wait was long.",0,0
+feedback_id,text,gemini-2.5-flash,gpt-4o-mini
+1,"The pizza was amazing, but a bit too salty.",-1,1
+2,"The staff was friendly, but the wait was long.",-1,0
 3,"I loved the dessert, it was the highlight of the meal.",1,1
 4,The portion was too small for the price.,-1,-1
 5,"The ambiance was great, perfect for a casual dinner.",1,1
@@ -9,10 +9,10 @@ feedback_id,text,gemini-1.5-flash,gpt-4o-mini
 8,"I didn't enjoy the soup, it was too cold.",-1,-1
 9,The restaurant was clean and well-maintained.,1,1
 10,"The drinks were overpriced, but the food was good.",0,0
-11,"The service was quick, but the food was average.",0,0
+11,"The service was quick, but the food was average.",-1,0
 12,The salad was fresh and crispy.,1,1
 13,The burger was overcooked and dry.,-1,-1
-14,The appetizers were tasty but arrived late.,0,0
+14,The appetizers were tasty but arrived late.,-1,0
 15,The lighting was too dim for my liking.,-1,0
 16,The waiter was attentive and knowledgeable.,1,1
 17,The sushi rolls were beautifully presented.,1,1

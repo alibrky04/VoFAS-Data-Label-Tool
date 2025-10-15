@@ -1,6 +1,9 @@
 import google.generativeai as genai
 from openai import OpenAI
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 class apiController:
     """
@@ -14,10 +17,11 @@ class apiController:
         :param models: List of AI models to be used for generating responses.
         """
         genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-        self.gmn_model = genai.GenerativeModel('gemini-1.5-flash')
+        self.gmn_model_name = 'gemini-2.5-flash'
+        self.gmn_model = genai.GenerativeModel(self.gmn_model_name)
 
         self.gpt_client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-        self.gpt_model = 'gpt-4o-mini'
+        self.gpt_model_name = 'gpt-4o-mini'
         self.gpt_temperature = 0.4
         self.gpt_max_tokens = 2000
 
@@ -31,19 +35,19 @@ class apiController:
         :param model: The name of the model (e.g., 'Gemini').
         :param prompt: The prompt string to be sent to the model.
         """
-        if model == 'gemini-1.5-flash':
+        if model == self.gmn_model_name:
             message = system_message + prompt
             self.responses[model] = self.gmn_model.generate_content(message)
             self.responseTexts[model] = self.responses[model].text.splitlines()
-        elif model == 'gpt-4o-mini':
+        elif model == self.gpt_model_name:
             messages = [{"role": "system", "content": system_message},
                         {"role": "user", "content": prompt}]
             
             self.responses[model] = self.gpt_client.chat.completions.create(
-                model=self.gpt_model,
+                model=self.gpt_model_name,
                 messages=messages,
                 temperature=self.gpt_temperature,
-                max_tokens=self.gpt_max_tokens
+                max_completion_tokens=self.gpt_max_tokens
             )
 
             self.responseTexts[model] = self.responses[model].choices[0].message.content.splitlines()

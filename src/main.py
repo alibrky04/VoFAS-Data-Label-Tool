@@ -3,7 +3,7 @@ from Controllers.apiController import apiController
 from Controllers.promptController import promptController
 from Controllers.sentimentController import sentimentController
 
-models = ['gemini-1.5-flash', 'gpt-4o-mini']
+models = ['gemini-2.5-flash', 'gpt-4o-mini']
 input_file_path = 'example_data.csv'
 output_file_path = 'example_output.csv'
 
