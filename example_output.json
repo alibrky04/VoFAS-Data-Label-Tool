@@ -1,0 +1,66 @@
+{
+    "gemini-2.5-flash": [
+        {
+            "feedback_id": "FB001",
+            "text": "The product quality is excellent and delivery was fast.",
+            "sentiment": 1,
+            "confidence_score": 0.95
+        },
+        {
+            "feedback_id": "FB002",
+            "text": "Customer service was unhelpful and slow.",
+            "sentiment": -1,
+            "confidence_score": 0.95
+        },
+        {
+            "feedback_id": "FB003",
+            "text": "Pricing is fair, but the packaging could be improved.",
+            "sentiment": 0,
+            "confidence_score": 0.75
+        },
+        {
+            "feedback_id": "FB004",
+            "text": "I love the new features in the latest update!",
+            "sentiment": 1,
+            "confidence_score": 0.9
+        },
+        {
+            "feedback_id": "FB005",
+            "text": "The app crashes frequently and is frustrating to use.",
+            "sentiment": -1,
+            "confidence_score": 0.95
+        }
+    ],
+    "gpt-4o-mini": [
+        {
+            "feedback_id": "FB001",
+            "text": "The product quality is excellent and delivery was fast.",
+            "sentiment": 1,
+            "confidence_score": 0.95
+        },
+        {
+            "feedback_id": "FB002",
+            "text": "Customer service was unhelpful and slow.",
+            "sentiment": -1,
+            "confidence_score": 0.9
+        },
+        {
+            "feedback_id": "FB003",
+            "text": "Pricing is fair, but the packaging could be improved.",
+            "sentiment": 0,
+            "confidence_score": 0.7
+        },
+        {
+            "feedback_id": "FB004",
+            "text": "I love the new features in the latest update!",
+            "sentiment": 1,
+            "confidence_score": 0.93
+        },
+        {
+            "feedback_id": "FB005",
+            "text": "The app crashes frequently and is frustrating to use.",
+            "sentiment": -1,
+            "confidence_score": 0.85
+        }
+    ]
+}

@@ -1,17 +1,16 @@
-from Controllers.fileController import fileController
+from Controllers.fileController import FileController
 from Controllers.apiController import apiController
 from Controllers.promptController import promptController
-from Controllers.sentimentController import sentimentController
 
 models = ['gemini-2.5-flash', 'gpt-4o-mini']
-input_file_path = 'example_data.csv'
-output_file_path = 'example_output.csv'
+input_file_path = 'example_data.json'
+output_file_path = 'example_output.json'
 
-fileController = fileController(input_file_path, output_file_path, models)
+fileController = FileController(input_file_path, output_file_path, models)
 apiController = apiController(models)
 promptController = promptController()
 
-fileController.readCSVFile()
+fileController.readJSONFile()
 fileController.createPromptData()
 
 data = fileController.prompt_data
@@ -23,5 +22,4 @@ for model in models:
     apiController.printResponse(model)
 
 fileController.createOutputData(apiController.responseTexts)
-
-fileController.writeCSVFile()
+fileController.writeJSONFile()
