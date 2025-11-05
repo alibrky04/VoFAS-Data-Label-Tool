@@ -3,3 +3,8 @@ openai
 pandas
 spacy
 dotenv
+anthropic
+nltk
+langdetect
+gensim
+scikit-learn
