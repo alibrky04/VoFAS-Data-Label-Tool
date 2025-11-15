@@ -1,3 +1,10 @@
 .venv
 .env
 __pycache__/
+batch_inputs/
+batch_outputs/
+datasets/
+job_trackers/
+outputs/
+batch_history.log.json
+commands.txt

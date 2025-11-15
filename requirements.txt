@@ -1,4 +1,5 @@
 google-generativeai
+google-genai
 openai
 pandas
 spacy
