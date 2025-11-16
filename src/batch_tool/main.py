@@ -53,15 +53,15 @@ PREPROCESS_JOB_TRACKER_FILE = os.path.join(TRACKERS_DIR, "preprocess_batch_jobs.
 HISTORY_LOG_FILE = "batch_history.log.json"
 
 # --- Model Configuration ---
-PREPROCESSOR_MODEL_NAME = "gemini-2.5-flash"      # Model for 'preprocess'
+PREPROCESSOR_MODEL_NAME = "gemini-2.5-flash-lite"      # Model for 'preprocess'
 OPENAI_MODEL_NAME = "gpt-4o-mini"         # Model for 'send --provider openai'
-GOOGLE_MODEL_NAME = "gemini-2.5-flash"        # Model for 'send --provider google'
+GOOGLE_MODEL_NAME = "gemini-2.5-flash-lite"        # Model for 'send --provider google'
 CLAUDE_MODEL_NAME = "claude-3-haiku-20240307" # Model for 'send --provider claude'
 
 # Ensure directories exist
 os.makedirs(INPUTS_DIR, exist_ok=True)
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
-os.makedirs(TRACKERS_DIR, exist_ok=True) # Ensure tracker dir exists
+os.makedirs(TRACKERS_DIR, exist_ok=True)
 
 # --- Utility Functions ---
 
@@ -981,20 +981,26 @@ def send_claude_batch(
     
     batch_requests = []
     
+    id_map = {}
+    
     for i, review in enumerate(reviews):
-        unique_id = review.get("unique_id", f"review_{i}")
+        original_id = review.get("unique_id", f"review_{i}")
         review_text = review.get("review_text", "").strip()
         
         sentences = review.get("sentences")
 
         if not review_text or not sentences or not isinstance(sentences, list):
-            print(f"\nWarning: Skipping review (ID: {unique_id}). 'review_text' or 'sentences' key is missing/invalid.")
+            print(f"\nWarning: Skipping review (ID: {original_id}). 'review_text' or 'sentences' key is missing/invalid.")
             continue
             
-        user_prompt = get_user_prompt_from_review_and_sentences(unique_id, review_text, sentences)
+        user_prompt = get_user_prompt_from_review_and_sentences(original_id, review_text, sentences)
+        
+        claude_id = original_id[:64]
+        if claude_id != original_id:
+            id_map[claude_id] = original_id
         
         request = ClaudeRequest(
-            custom_id=unique_id,
+            custom_id=claude_id,
             params=MessageCreateParamsNonStreaming(
                 model=CLAUDE_MODEL_NAME, 
                 system=claude_system_prompt,
@@ -1010,6 +1016,8 @@ def send_claude_batch(
         return
 
     print(f"Sending {len(batch_requests)} requests to Claude async batch API...")
+    if id_map:
+        print(f"Found and truncated {len(id_map)} IDs for Claude compatibility.")
     
     try:
         batch_job = client.messages.batches.create(requests=batch_requests)
@@ -1020,7 +1028,8 @@ def send_claude_batch(
         jobs = load_job_tracker(CLAUDE_JOB_TRACKER_FILE)
         jobs[batch_job.id] = {
             "status": batch_job.processing_status,
-            "input_file": "N/A (JSON payload)"
+            "input_file": "N/A (JSON payload)",
+            "id_map": id_map
         }
         save_job_tracker(jobs, CLAUDE_JOB_TRACKER_FILE)
         print(f"Batch job {batch_job.id} added to tracker. Use 'claude-status' to check progress.")
@@ -1087,7 +1096,9 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
     
     jobs = load_job_tracker(CLAUDE_JOB_TRACKER_FILE)
     job_info = jobs.get(batch_id)
-    input_file = "unknown" # Default
+    input_file = "unknown"
+    
+    id_map = {}
 
     if job_info is None:
         print(f"Error: Batch ID {batch_id} not found in pending tracker.")
@@ -1095,6 +1106,9 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
         return
     else:
         input_file = job_info.get("input_file", "unknown")
+        id_map = job_info.get("id_map", {})
+        if id_map:
+            print(f"Loaded {len(id_map)} ID(s) from the job tracker for re-mapping.")
 
     try:
         batch_job = client.messages.batches.retrieve(batch_id)
@@ -1117,37 +1131,39 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
         errors = 0
 
         for result in client.messages.batches.results(batch_id):
-            custom_id = result.custom_id
+            short_id = result.custom_id
+            
+            original_id = id_map.get(short_id, short_id)
             
             if result.result.type == 'succeeded':
                 content_str = result.result.message.content[0].text
                 parsed_content = safe_json_parse(content_str)
                 if not parsed_content:
-                    parsed_content = {"error": "Failed to parse model JSON", "feedback_id": custom_id}
+                    parsed_content = {"error": "Failed to parse model JSON", "feedback_id": original_id}
                     errors += 1
             
             elif result.result.type == 'errored':
                 error_message = str(result.result.error)
-                print(f"Error in result for {custom_id}: {error_message}")
-                parsed_content = {"error": error_message, "feedback_id": custom_id}
+                print(f"Error in result for {original_id}: {error_message}")
+                parsed_content = {"error": error_message, "feedback_id": original_id}
                 errors += 1
             
             elif result.result.type == 'canceled':
-                print(f"Result for {custom_id} was canceled.")
-                parsed_content = {"error": "Request was canceled", "feedback_id": custom_id}
+                print(f"Result for {original_id} was canceled.")
+                parsed_content = {"error": "Request was canceled", "feedback_id": original_id}
                 errors += 1
             
             elif result.result.type == 'expired':
-                print(f"Result for {custom_id} expired.")
-                parsed_content = {"error": "Request expired", "feedback_id": custom_id}
+                print(f"Result for {original_id} expired.")
+                parsed_content = {"error": "Request expired", "feedback_id": original_id}
                 errors += 1
             
             else:
-                print(f"Unknown result type for {custom_id}: {result.result.type}")
-                parsed_content = {"error": "Unknown result type", "feedback_id": custom_id}
+                print(f"Unknown result type for {original_id}: {result.result.type}")
+                parsed_content = {"error": "Unknown result type", "feedback_id": original_id}
                 errors += 1
 
-            parsed_content['feedback_id'] = custom_id
+            parsed_content['feedback_id'] = original_id
             all_results.append(parsed_content)
         
         print(f"Successfully processed {len(all_results)} Claude results with {errors} errors.")
@@ -1169,7 +1185,6 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
 
     except Exception as e:
         print(f"An error occurred during Claude result retrieval: {e}")
-
 
 def merge_results(
     output_filepath: str, 

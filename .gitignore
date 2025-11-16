@@ -8,3 +8,4 @@ job_trackers/
 outputs/
 batch_history.log.json
 commands.txt
+label_analysis.txt
