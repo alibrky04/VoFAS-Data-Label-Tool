@@ -188,8 +188,7 @@ def prepare_openai_batch_file(
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    "response_format": {"type": "json_object"},
-                    "max_tokens": 4096
+                    "response_format": {"type": "json_object"}
                 }
             }
             f.write(json.dumps(request) + "\n")
@@ -247,7 +246,7 @@ def check_openai_status(client: OpenAI, batch_id: str = None):
     jobs = load_job_tracker(OPENAI_JOB_TRACKER_FILE)
     if not jobs:
         print("No active OpenAI batch jobs to check.")
-        return
+        return False
 
     if batch_id:
         if batch_id not in jobs:
@@ -291,6 +290,8 @@ def check_openai_status(client: OpenAI, batch_id: str = None):
         print("All tracked jobs have completed.")
     elif len(updated_jobs) < len(jobs):
         print("Some jobs completed and were removed from tracker.")
+    
+    return bool(updated_jobs)
 
 def retrieve_openai_results(client: OpenAI, batch_id: str):
     print(f"Attempting to retrieve results for batch ID: {batch_id}")
@@ -380,7 +381,7 @@ def prepare_google_batch_file(
     gen_config_dict = {
         "response_mime_type": gen_config_obj.response_mime_type,
         "temperature": gen_config_obj.temperature,
-        "max_output_tokens": gen_config_obj.max_output_tokens
+        # "max_output_tokens": gen_config_obj.max_output_tokens
     }
 
     valid_requests = 0
@@ -480,7 +481,7 @@ def check_google_status(api_key: str, job_name: str = None):
     jobs = load_job_tracker(GOOGLE_JOB_TRACKER_FILE)
     if not jobs:
         print("No active Google batch jobs to check.")
-        return
+        return False
 
     if job_name:
         if job_name not in jobs:
@@ -540,6 +541,8 @@ def check_google_status(api_key: str, job_name: str = None):
         print("All tracked Google jobs have completed.")
     elif len(updated_jobs) < len(jobs):
         print("Some Google jobs completed and were removed from tracker.")
+    
+    return bool(updated_jobs)
 
 def retrieve_google_results(api_key: str, job_name: str):
     print(f"Attempting to retrieve results for Google job: {job_name}")
@@ -663,8 +666,7 @@ def prepare_preprocess_batch_file(
     # Simple config dict for JSON output
     gen_config_dict = {
         "response_mime_type": "application/json",
-        "temperature": 0.0,
-        "max_output_tokens": 4096 
+        "temperature": 0.0
     }
 
     valid_requests = 0
@@ -766,7 +768,7 @@ def check_preprocess_status(api_key: str, job_name: str = None):
     jobs = load_job_tracker(PREPROCESS_JOB_TRACKER_FILE)
     if not jobs:
         print("No active Google preprocess jobs to check.")
-        return
+        return False
 
     if job_name:
         if job_name not in jobs:
@@ -825,6 +827,8 @@ def check_preprocess_status(api_key: str, job_name: str = None):
         print("All tracked Google preprocess jobs have completed.")
     elif len(updated_jobs) < len(jobs):
         print("Some Google preprocess jobs completed and were removed from tracker.")
+
+    return bool(updated_jobs)
 
 def retrieve_preprocess_results(api_key: str, job_name: str):
     """Retrieves preprocess results, merges with original reviews, and saves."""
@@ -995,7 +999,8 @@ def send_claude_batch(
                 model=CLAUDE_MODEL_NAME, 
                 system=claude_system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=4096,
+                temperature=0.0,
+                max_tokens=4096
             )
         )
         batch_requests.append(request)
@@ -1027,7 +1032,7 @@ def check_claude_status(client: "Anthropic", batch_id: str = None):
     jobs = load_job_tracker(CLAUDE_JOB_TRACKER_FILE)
     if not jobs:
         print("No active Claude batch jobs to check.")
-        return
+        return False
 
     if batch_id:
         if batch_id not in jobs:
@@ -1075,6 +1080,8 @@ def check_claude_status(client: "Anthropic", batch_id: str = None):
     elif len(updated_jobs) < len(jobs):
         print("Some Claude jobs completed and were removed from tracker.")
 
+    return bool(updated_jobs)
+
 def retrieve_claude_results(client: "Anthropic", batch_id: str):
     print(f"Attempting to retrieve results for Claude batch ID: {batch_id}")
     
@@ -1120,8 +1127,9 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
                     errors += 1
             
             elif result.result.type == 'errored':
-                print(f"Error in result for {custom_id}: {result.result.error.message}")
-                parsed_content = {"error": result.result.error.message, "feedback_id": custom_id}
+                error_message = str(result.result.error)
+                print(f"Error in result for {custom_id}: {error_message}")
+                parsed_content = {"error": error_message, "feedback_id": custom_id}
                 errors += 1
             
             elif result.result.type == 'canceled':
@@ -1274,6 +1282,7 @@ def main():
                              help="The provider to send the job to.")
     parser_send.add_argument("--lang", type=str, nargs='+',
                              help="Filter by one or more language codes (e.g., --lang en tr). Sends all if omitted.")
+    parser_send.add_argument("--limit", type=int, help="Limit the number of reviews to send (e.g., 10).")
     
     parser_status = subparsers.add_parser("status", help="Check status of pending OpenAI jobs.")
     parser_status.add_argument("--batch-id", type=str, help="Check a specific OpenAI batch ID. Checks all if omitted.")
@@ -1293,6 +1302,8 @@ def main():
     parser_claude_retrieve = subparsers.add_parser("claude-retrieve", help="Retrieve results for a completed Claude job.")
     parser_claude_retrieve.add_argument("--batch-id", type=str, required=True, help="The Claude batch ID to retrieve.")
 
+    parser_status_all = subparsers.add_parser("status-all", help="Check status of all pending jobs from ALL providers.")
+    
     # --- Utility Command ---
     parser_merge = subparsers.add_parser("merge", help="Merge completed result files from any provider.")
     parser_merge.add_argument("output_file", type=str, help="Path for the final merged output file.")
@@ -1365,6 +1376,13 @@ def main():
                 print("No reviews match the specified languages. Exiting.")
                 return
         
+        if args.limit and args.limit > 0:
+            if args.limit < len(reviews):
+                print(f"Limiting to the first {args.limit} reviews for sending.")
+                reviews = reviews[:args.limit]
+            else:
+                print(f"--limit value ({args.limit}) is >= total reviews. Processing all {len(reviews)} reviews.")
+
         print(f"Processing {len(reviews)} pre-processed reviews from {args.reviews_file}.")
 
         if args.provider in ["openai", "all"]:
@@ -1431,6 +1449,43 @@ def main():
             google_filepath=args.google, 
             claude_filepath=args.claude
         )
+    
+    elif args.command == "status-all":
+        print("--- Checking All Pending Jobs ---")
+        has_pending = False
+
+        print("\n--- 1. Google Preprocessing Jobs ---")
+        if not google_key:
+            print("Cannot check Google status: GOOGLE_API_KEY is not set.")
+        else:
+            if check_preprocess_status(google_key, job_name=None):
+                has_pending = True
+        
+        print("\n--- 2. OpenAI Sentiment Jobs ---")
+        if not openai_client:
+            print("Cannot check OpenAI status: OPENAI_API_KEY is not set.")
+        else:
+            if check_openai_status(openai_client, batch_id=None):
+                has_pending = True
+
+        print("\n--- 3. Google Sentiment Jobs ---")
+        if not google_key:
+            print("Cannot check Google status: GOOGLE_API_KEY is not set.")
+        else:
+            if check_google_status(google_key, job_name=None):
+                has_pending = True
+
+        print("\n--- 4. Claude Sentiment Jobs ---")
+        if not anthropic_client:
+            print("Cannot check Claude status: ANTHROPIC_API_KEY is not set or client failed to initialize.")
+        else:
+            if check_claude_status(anthropic_client, batch_id=None):
+                has_pending = True
+        
+        if not has_pending:
+            print("\n--- No pending jobs found for any provider. ---")
+        else:
+            print("\n--- All Status Checks Complete ---")
 
 if __name__ == "__main__":
     main()

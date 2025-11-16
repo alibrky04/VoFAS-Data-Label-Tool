@@ -75,18 +75,35 @@ def get_system_prompt() -> str:
     {schema}
 
     RULES:
-    1.  **Sentiment Score:** You must label sentiment as:
-        * `1`: Clearly Positive (e.g., "I love it", "great", "güzel", "çok beğendim")
-        * `0`: Neutral or Mixed (e.g., "It's okay", "Normal", "The food was good but the service was bad", "Personel iyiydi ama oda kirliydi")
-        * `-1`: Clearly Negative (e.g., "I hate it", "terrible", "kötü", "asla tavsiye etmem")
-    2.  **Confidence:** Provide a float from 0.0 to 1.0 for your confidence in each sentiment score.
-    3.  **Full Review:** Analyze the `full_review_text` for its *overall* sentiment and put this in the `full_review_sentiment` object.
+    1.  **Sentiment Score (Per Sentence):** You must label each sentence's sentiment based on the following **strict** rules:
+        
+        * `0` (Neutral): **STRICTLY** reserved for purely objective, factual statements that contain **NO** opinion or feeling. 
+          * *Examples:* "I arrived at 5 PM." ("Saat 17:00'de vardım."), "The apple was red." ("Elma kırmızıydı."), "The airport was opened in 2016."
+
+        * `1` (Positive): Any sentence that expresses a positive opinion, feeling, or connotation, even mildly.
+          * *Examples:* "I love it." ("Çok beğendim."), "It was good." ("İyiydi."), "The staff was helpful." ("Personel yardımcı oldu.")
+
+        * `-1` (Negative): Any sentence that expresses a negative opinion, feeling, complaint, criticism, or connotation, **even if it's implied**.
+          * *If a sentence suggests something is "too much", "not enough", or "could be better", it is **Negative**.*
+          * *Examples:* "I hate it." ("Berbat."), "The internet was slow." ("İnternet yavaştı."), "There should have been more escalators." ("Daha fazla yürüyen merdiven olmalıydı.")
+
+    2.  **Full Review Sentiment (Holistic):**
+        * You must analyze the `full_review_text` for its **overall, dominant feeling**.
+        * **This is NOT a mathematical sum.** Do not just count positive/negative sentences. Read the text as a human would.
+        * A single, powerful negative sentence (e.g., "A total ripoff, I will never return") can outweigh several minor positive sentences, making the *overall* review Negative (`-1`).
+        * Conversely, a minor complaint (e.g., "Check-in was slow") can be overshadowed by strong praise, making the *overall* review Positive (`1`).
+        * Use `0` (Neutral/Mixed) only if the positive and negative feelings truly balance each other out *in impact*, or if the entire review is purely factual.
+
+    3.  **Confidence:** Provide a float from 0.0 to 1.0 for your confidence in each sentiment score.
+
     4.  **Sentence Sentiments (CRITICAL):**
         * The `sentence_sentiments` array in your response MUST contain one object for each sentence in the `pre_split_sentences` list.
         * The number of objects in `sentence_sentiments` MUST exactly match the number of items in the `pre_split_sentences` list.
         * The `sentence_text` in your response object MUST *exactly* match the corresponding string from the `pre_split_sentences` list, in the *exact same order*.
         * Do NOT create your own sentences. Do NOT modify the sentences.
+
     5.  **Matching IDs:** The `feedback_id` and `full_review_text` in your response must exactly match the ones provided in the user prompt.
+    
     6.  **Language:** Analyze the text in its original language (Turkish or English). Do not translate.
     """
     return prompt
@@ -118,6 +135,5 @@ def get_google_generation_config() -> GenerationConfig:
     """Returns the GenerationConfig for Google, forcing JSON output."""
     return GenerationConfig(
         response_mime_type="application/json",
-        temperature=0.0,
-        max_output_tokens=8192,
+        temperature=0.0
     )
