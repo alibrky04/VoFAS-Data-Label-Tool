@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
 
 """
-Batch Sentiment Analysis Tool
-Handles sending, checking, and retrieving sentiment analysis jobs from
+Batch Sentiment & Topic Analysis Tool
+Handles sending, checking, and retrieving analysis jobs from
 OpenAI (async batch), Google Gemini (async batch), and Claude (async batch).
-
-V16 Changes:
-- Fixed logic bug where 'status' commands would delete 'SUCCEEDED' jobs,
-  causing 'retrieve' commands to fail.
-- Status commands now only delete FAILED/CANCELLED/EXPIRED jobs.
-- Retrieve commands now delete the job from the tracker *after*
-  successful download. This fix is applied to all providers.
-- Removed leftover 'genai.configure()' call from main() to fix
-  startup warning.
 """
 
 import os
@@ -20,6 +11,7 @@ import json
 import argparse
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+from collections import Counter
 
 from anthropic import Anthropic
 from anthropic.types.message_create_params import (
@@ -36,6 +28,8 @@ from dotenv import load_dotenv
 # Local imports
 from prompt_controller import (
     get_system_prompt, 
+    get_topic_discovery_system_prompt,
+    get_topic_classification_system_prompt,
     get_user_prompt_from_review_and_sentences, 
     get_google_generation_config,
     get_preprocess_prompt
@@ -154,6 +148,75 @@ def safe_json_parse(json_string: str) -> Dict[str, Any]:
         print(f"Warning: Unexpected error parsing JSON: {e}. Content: {json_string[:200]}...")
         return {}
 
+def summarize_topic_discovery(results: List[Dict[str, Any]], base_output_path: str):
+    """
+    Analyzes the results of a topic-discovery job and creates a summary file.
+    """
+    print("\n--- Generating Topic Discovery Summary ---")
+    
+    full_review_topics = Counter()
+    sentence_topics = Counter()
+    
+    valid_results = 0
+    
+    for item in results:
+        if "error" in item:
+            continue
+            
+        # Access the inner 'response_data' if it exists (merged file structure), 
+        # otherwise assume it's a raw result list item
+        data = item
+        
+        # Check if this is a merged file structure wrapper or direct result
+        if "response_data" in item:
+             # This helper is usually called on raw lists, but just in case
+             pass 
+
+        # Extract Full Review Topics
+        fr_topics = data.get("full_review_topics", [])
+        if isinstance(fr_topics, list):
+            # Normalize to title case and strip whitespace
+            clean_topics = [t.strip().title() for t in fr_topics if isinstance(t, str)]
+            full_review_topics.update(clean_topics)
+            
+        # Extract Sentence Topics
+        s_topics = data.get("sentence_topics", [])
+        if isinstance(s_topics, list):
+            for s in s_topics:
+                if isinstance(s, dict):
+                    topic = s.get("topic")
+                    if topic and isinstance(topic, str):
+                        sentence_topics.update([topic.strip().title()])
+        
+        valid_results += 1
+
+    # Prepare Summary Dict
+    summary = {
+        "total_reviews_processed": valid_results,
+        "unique_topics_found": len(full_review_topics),
+        "full_review_topic_counts": dict(full_review_topics.most_common()),
+        "sentence_topic_counts": dict(sentence_topics.most_common())
+    }
+    
+    # Save Summary File
+    summary_path = base_output_path.replace(".json", "_summary.json")
+    try:
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        print(f"Summary file saved to: {summary_path}")
+    except Exception as e:
+        print(f"Error saving summary file: {e}")
+
+    # Print Top Topics to Console
+    print(f"\nTop 20 Detected Topics (Full Reviews):")
+    print(f"{'Topic':<30} | {'Count':<10}")
+    print("-" * 45)
+    for topic, count in full_review_topics.most_common(20):
+        print(f"{topic:<30} | {count:<10}")
+    print("-" * 45)
+    print("Review the '_summary.json' file for the complete list.")
+    print("Use these topics to build your allowed topics list for Step 2.\n")
+
 # --- OpenAI Batch Functions ---
 
 def prepare_openai_batch_file(
@@ -200,7 +263,8 @@ def prepare_openai_batch_file(
 def send_openai_batch(
     client: OpenAI, 
     reviews: List[Dict[str, Any]], 
-    system_prompt: str
+    system_prompt: str,
+    task: str
 ):
     """Prepares, uploads, and starts an OpenAI batch job."""
     print("Preparing OpenAI batch file...")
@@ -232,7 +296,8 @@ def send_openai_batch(
         jobs[batch_job.id] = {
             "status": batch_job.status,
             "input_file": jsonl_filepath,
-            "output_file_id": None
+            "output_file_id": None,
+            "task": task 
         }
         save_job_tracker(jobs, OPENAI_JOB_TRACKER_FILE)
         print(f"Batch job {batch_job.id} added to tracker. Use 'status' to check progress.")
@@ -300,6 +365,7 @@ def retrieve_openai_results(client: OpenAI, batch_id: str):
     job_info = jobs.get(batch_id)
     input_file = "unknown"
     output_file_id = None
+    task = "sentiment" # Default if missing
     
     if job_info is None:
         print(f"Error: Batch ID {batch_id} not found in pending tracker.")
@@ -307,7 +373,8 @@ def retrieve_openai_results(client: OpenAI, batch_id: str):
         return
     else:
         input_file = job_info.get("input_file", "unknown")
-        output_file_id = job_info.get("output_file_id") # Get from status check
+        output_file_id = job_info.get("output_file_id")
+        task = job_info.get("task", "sentiment")
 
     try:
         if not output_file_id:
@@ -357,6 +424,10 @@ def retrieve_openai_results(client: OpenAI, batch_id: str):
         print(f"Results saved to {output_filename}")
 
         log_completed_job("openai", batch_id, "completed", output_filename, input_file)
+        
+        # --- Auto Summarize for Topic Discovery ---
+        if task == "topic-discovery":
+            summarize_topic_discovery(all_results, output_filename)
 
         # Now we can safely delete it
         if batch_id in jobs:
@@ -367,7 +438,7 @@ def retrieve_openai_results(client: OpenAI, batch_id: str):
     except Exception as e:
         print(f"An error occurred during OpenAI result retrieval: {e}")
 
-# --- Google Gemini Functions (Sentiment Analysis) ---
+# --- Google Gemini Functions ---
 
 def prepare_google_batch_file(
     reviews: List[Dict[str, Any]], 
@@ -381,7 +452,6 @@ def prepare_google_batch_file(
     gen_config_dict = {
         "response_mime_type": gen_config_obj.response_mime_type,
         "temperature": gen_config_obj.temperature,
-        # "max_output_tokens": gen_config_obj.max_output_tokens
     }
 
     valid_requests = 0
@@ -415,7 +485,8 @@ def prepare_google_batch_file(
 def send_google_batch(
     api_key: str, 
     reviews: List[Dict[str, Any]], 
-    system_prompt: str
+    system_prompt: str,
+    task: str
 ):
     """Prepares, uploads, and starts a Google Batch API job."""
     print("Configuring Google Gemini API Client (Batch)...")
@@ -463,7 +534,8 @@ def send_google_batch(
         jobs[file_batch_job.name] = {
             "status": file_batch_job.state.name,
             "input_file": jsonl_filepath,
-            "output_file": None # We don't know this yet
+            "output_file": None, # We don't know this yet
+            "task": task
         }
         save_job_tracker(jobs, GOOGLE_JOB_TRACKER_FILE)
         print(f"Batch job {file_batch_job.name} added to tracker. Use 'google-status' to check progress.")
@@ -551,6 +623,7 @@ def retrieve_google_results(api_key: str, job_name: str):
     job_info = jobs.get(job_name)
     input_file = "unknown" 
     output_file_name = None # This is the full path, e.g., 'files/batch-...'
+    task = "sentiment"
 
     if job_info is None:
         print(f"Error: Job Name {job_name} not found in pending tracker.")
@@ -559,6 +632,7 @@ def retrieve_google_results(api_key: str, job_name: str):
     else:
         input_file = job_info.get("input_file", "unknown")
         output_file_name = job_info.get("output_file") # Get from status check
+        task = job_info.get("task", "sentiment")
         
     try:
         client = genai.Client()
@@ -601,7 +675,6 @@ def retrieve_google_results(api_key: str, job_name: str):
                     
                     if not response_data.get("candidates"):
                         print(f"Warning: No candidates in response for {custom_id}. Safety block?")
-                        print(f"  - Finish Reason: {response_data.get('prompt_feedback', {}).get('block_reason')}")
                         parsed_content = {"error": "No content in response (safety block?)", "feedback_id": custom_id}
                         errors += 1
                         all_results.append(parsed_content)
@@ -636,6 +709,10 @@ def retrieve_google_results(api_key: str, job_name: str):
 
         log_completed_job("google", job_name, "completed", output_filename_local, input_file)
 
+        # --- Auto Summarize for Topic Discovery ---
+        if task == "topic-discovery":
+            summarize_topic_discovery(all_results, output_filename_local)
+
         if job_name in jobs:
             del jobs[job_name]
             save_job_tracker(jobs, GOOGLE_JOB_TRACKER_FILE)
@@ -654,7 +731,7 @@ def retrieve_google_results(api_key: str, job_name: str):
     except Exception as e:
         print(f"An error occurred during Google result retrieval: {e}")
 
-# --- [NEW] Google Gemini Functions (Preprocessing) ---
+# --- Google Gemini Functions (Preprocessing) ---
 
 def prepare_preprocess_batch_file(
     reviews: List[Dict[str, Any]]
@@ -967,7 +1044,8 @@ def retrieve_preprocess_results(api_key: str, job_name: str):
 def send_claude_batch(
     client: "Anthropic", 
     reviews: List[Dict[str, Any]], 
-    system_prompt: str
+    system_prompt: str,
+    task: str
 ):
     """Prepares and starts a Claude async batch job from pre-processed reviews."""
     print("Preparing requests for Claude async batch...")
@@ -1029,7 +1107,8 @@ def send_claude_batch(
         jobs[batch_job.id] = {
             "status": batch_job.processing_status,
             "input_file": "N/A (JSON payload)",
-            "id_map": id_map
+            "id_map": id_map,
+            "task": task
         }
         save_job_tracker(jobs, CLAUDE_JOB_TRACKER_FILE)
         print(f"Batch job {batch_job.id} added to tracker. Use 'claude-status' to check progress.")
@@ -1097,6 +1176,7 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
     jobs = load_job_tracker(CLAUDE_JOB_TRACKER_FILE)
     job_info = jobs.get(batch_id)
     input_file = "unknown"
+    task = "sentiment"
     
     id_map = {}
 
@@ -1107,6 +1187,7 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
     else:
         input_file = job_info.get("input_file", "unknown")
         id_map = job_info.get("id_map", {})
+        task = job_info.get("task", "sentiment")
         if id_map:
             print(f"Loaded {len(id_map)} ID(s) from the job tracker for re-mapping.")
 
@@ -1175,6 +1256,10 @@ def retrieve_claude_results(client: "Anthropic", batch_id: str):
         print(f"Results saved to {output_filename}")
 
         log_completed_job("claude", batch_id, "completed", output_filename, input_file)
+
+        # --- Auto Summarize for Topic Discovery ---
+        if task == "topic-discovery":
+            summarize_topic_discovery(all_results, output_filename)
 
         if batch_id in jobs:
             del jobs[batch_id]
@@ -1258,9 +1343,6 @@ def main():
     if not claude_key:
         print("Warning: ANTHROPIC_API_KEY not found. Claude functions will fail.")
 
-    # --- [REMOVED] genai.configure() block ---
-    # The new 'genai.Client()' finds the GOOGLE_API_KEY from .env automatically.
-
     # Instantiate clients if keys exist
     openai_client = OpenAI(api_key=openai_key) if openai_key else None
     
@@ -1290,14 +1372,20 @@ def main():
     parser_preprocess_retrieve = subparsers.add_parser("preprocess-retrieve", help="3/3: Retrieve results for a completed preprocessing job.")
     parser_preprocess_retrieve.add_argument("--job-name", type=str, required=True, help="The Google job name to retrieve (e.g., 'batches/123').")
 
-    # --- Sentiment Analysis Commands ---
-    parser_send = subparsers.add_parser("send", help="Send a new ASYNC batch job for sentiment analysis.")
+    # --- Analysis Commands (Sentiment & Topic) ---
+    parser_send = subparsers.add_parser("send", help="Send a new ASYNC batch job for analysis (Sentiment or Topic).")
     parser_send.add_argument("reviews_file", type=str, help="Path to the *pre-processed* reviews JSON file.")
     parser_send.add_argument("--provider", type=str, choices=["openai", "google", "claude", "all"], default="all",
                              help="The provider to send the job to.")
     parser_send.add_argument("--lang", type=str, nargs='+',
                              help="Filter by one or more language codes (e.g., --lang en tr). Sends all if omitted.")
     parser_send.add_argument("--limit", type=int, help="Limit the number of reviews to send (e.g., 10).")
+    
+    # NEW Arguments for Topic Modeling
+    parser_send.add_argument("--task", type=str, choices=["sentiment", "topic-discovery", "topic-classification"], 
+                             default="sentiment", help="The analysis task to perform.")
+    parser_send.add_argument("--topics-file", type=str, 
+                             help="Path to a text file containing allowed topics (one per line), required for topic-classification.")
     
     parser_status = subparsers.add_parser("status", help="Check status of pending OpenAI jobs.")
     parser_status.add_argument("--batch-id", type=str, help="Check a specific OpenAI batch ID. Checks all if omitted.")
@@ -1327,9 +1415,6 @@ def main():
     parser_merge.add_argument("--claude", type=str, help="Path to the Claude results JSON file.", default=None)
 
     args = parser.parse_args()
-
-    # Get system prompt
-    system_prompt = get_system_prompt()
 
     # --- Command Logic ---
 
@@ -1381,6 +1466,42 @@ def main():
             print("You must run 'preprocess-send' and 'preprocess-retrieve' first.")
             return
         
+        # --- Determine System Prompt based on Task ---
+        print(f"Task selected: {args.task}")
+        system_prompt = ""
+        
+        if args.task == "sentiment":
+            system_prompt = get_system_prompt()
+            
+        elif args.task == "topic-discovery":
+            system_prompt = get_topic_discovery_system_prompt()
+            
+        elif args.task == "topic-classification":
+            if not args.topics_file:
+                print("Error: --topics-file is required for topic-classification.")
+                print("Please provide a text file with one topic per line.")
+                return
+            
+            try:
+                with open(args.topics_file, 'r', encoding='utf-8') as f:
+                    allowed_topics = [line.strip() for line in f if line.strip()]
+                
+                if not allowed_topics:
+                    print(f"Error: Topics file {args.topics_file} is empty.")
+                    return
+                    
+                print(f"Loaded {len(allowed_topics)} allowed topics.")
+                system_prompt = get_topic_classification_system_prompt(allowed_topics)
+                
+            except Exception as e:
+                print(f"Error loading topics file: {e}")
+                return
+        else:
+            print("Unknown task selected.")
+            return
+            
+        # --- End Task Logic ---
+        
         if args.lang:
             lang_set = set(args.lang)
             print(f"Filtering for languages: {', '.join(lang_set)}")
@@ -1405,21 +1526,21 @@ def main():
                 print("Cannot send to OpenAI: OPENAI_API_KEY is not set.")
             else:
                 print("\n--- Sending to OpenAI ---")
-                send_openai_batch(openai_client, reviews, system_prompt)
+                send_openai_batch(openai_client, reviews, system_prompt, args.task)
         
         if args.provider in ["google", "all"]:
             if not google_key:
                 print("Cannot send to Google: GOOGLE_API_KEY is not set.")
             else:
                 print("\n--- Sending to Google ---")
-                send_google_batch(google_key, reviews, system_prompt)
+                send_google_batch(google_key, reviews, system_prompt, args.task)
         
         if args.provider in ["claude", "all"]:
             if not anthropic_client:
                 print("Cannot send to Claude: ANTHROPIC_API_KEY is not set or client failed to initialize.")
             else:
                 print("\n--- Sending to Claude ---")
-                send_claude_batch(anthropic_client, reviews, system_prompt)
+                send_claude_batch(anthropic_client, reviews, system_prompt, args.task)
 
     elif args.command == "status":
         if not openai_client:

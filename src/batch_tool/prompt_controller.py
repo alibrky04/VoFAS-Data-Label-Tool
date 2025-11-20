@@ -41,12 +41,9 @@ def get_preprocess_prompt(review_text: str, language_code: str) -> str:
 
 def get_system_prompt() -> str:
     """
-    Returns the system prompt for the main analysis, which defines the task, 
-    rules, and output format (JSON schema).
-    This version instructs the model to use a *pre-split* list of sentences.
+    Returns the system prompt for the SENTIMENT analysis.
     """
     
-    # This is the JSON schema we want the model to return.
     schema = """
     {
     "feedback_id": "string (must match the provided feedback_id)",
@@ -65,7 +62,6 @@ def get_system_prompt() -> str:
     }
     """
 
-    # The system prompt that instructs the model.
     prompt = f"""
     You are an expert sentiment analysis API. Your task is to analyze customer reviews for sentiment.
     You will be given a `feedback_id`, a `full_review_text`, and a list of `pre_split_sentences`.
@@ -108,6 +104,96 @@ def get_system_prompt() -> str:
     """
     return prompt
 
+def get_topic_discovery_system_prompt() -> str:
+    """
+    Returns the system prompt for TOPIC DISCOVERY (Phase 1).
+    Allows the model to generate topics freely.
+    """
+    
+    schema = """
+    {
+    "feedback_id": "string",
+    "full_review_text": "string",
+    "full_review_topics": ["string", "string"], 
+    "sentence_topics": [
+        {
+        "sentence_text": "string (must *exactly* match the pre-split sentence)",
+        "topic": "string (short, descriptive topic name)"
+        }
+    ]
+    }
+    """
+
+    prompt = f"""
+    You are an expert topic modeling API. Your task is to identify the key topics discussed in customer reviews.
+    You will be given a `feedback_id`, a `full_review_text`, and a list of `pre_split_sentences`.
+
+    Your response MUST be a single, valid JSON object conforming to:
+    {schema}
+
+    RULES:
+    1.  **Topic Assignment:**
+        * Analyze the content and assign short, descriptive topic labels (e.g., "Shipping", "Product Quality", "Customer Service", "Price", "Packaging").
+        * If a sentence is purely conversational or lacks specific content (e.g., "Hello", "Thanks"), use the topic "General".
+        * Topics should be 1-3 words maximum.
+
+    2.  **Full Review Topics:** * Identify the top 1 to 3 main themes for the entire review.
+
+    3.  **Sentence Topics:**
+        * Assign exactly ONE most relevant topic to each sentence in the `pre_split_sentences` list.
+        * The number of objects must match the input sentences exactly.
+        * Do NOT modify the `sentence_text`.
+
+    4.  **Language:** Output the topics in English, even if the review is in Turkish.
+    """
+    return prompt
+
+def get_topic_classification_system_prompt(allowed_topics: List[str]) -> str:
+    """
+    Returns the system prompt for TOPIC CLASSIFICATION (Phase 2).
+    Restricts the model to a specific list of topics.
+    """
+    
+    topics_formatted = ", ".join([f'"{t}"' for t in allowed_topics])
+    
+    schema = """
+    {
+    "feedback_id": "string",
+    "full_review_text": "string",
+    "full_review_topics": ["string"], 
+    "sentence_topics": [
+        {
+        "sentence_text": "string (must *exactly* match the pre-split sentence)",
+        "topic": "string (must be one of the Allowed Topics)"
+        }
+    ]
+    }
+    """
+
+    prompt = f"""
+    You are an expert topic classification API. Your task is to classify customer reviews into a predefined list of topics.
+    You will be given a `feedback_id`, a `full_review_text`, and a list of `pre_split_sentences`.
+
+    **ALLOWED TOPICS:**
+    [{topics_formatted}, "Other"]
+
+    Your response MUST be a single, valid JSON object conforming to:
+    {schema}
+
+    RULES:
+    1.  **Strict Classification:**
+        * You MUST choose topics ONLY from the **ALLOWED TOPICS** list provided above.
+        * If a sentence or review does not fit any specific topic, or is just general conversation, use "Other".
+
+    2.  **Full Review Topics:** * Select 1 to 3 topics from the list that best describe the whole review.
+
+    3.  **Sentence Topics:**
+        * Assign exactly ONE topic from the allowed list to each sentence.
+        * The number of objects must match the input sentences exactly.
+        * Do NOT modify the `sentence_text`.
+    """
+    return prompt
+
 def get_user_prompt_from_review_and_sentences(
     unique_id: str, 
     review_text: str, 
@@ -115,6 +201,7 @@ def get_user_prompt_from_review_and_sentences(
 ) -> str:
     """
     Creates the user prompt content, now including the pre-split sentences.
+    This is used for both Sentiment and Topic tasks.
     """
     
     # Format the list of sentences for the prompt
